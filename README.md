@@ -83,6 +83,41 @@ docker build \
   -t spring-petclinic:latest .
 ```
 
+## Bonus: self-hosted Artifactory
+
+The pipeline takes an `ARTIFACTORY` parameter — `cloud` (the default) or
+`selfhosted`. In `selfhosted` mode it resolves from a locally deployed Artifactory
+whose remote repository proxies the same JFrog Cloud instance, so dependencies
+still originate from JFrog Cloud:
+
+```
+Jenkins -> self-hosted Artifactory -> JFrog Cloud -> Maven Central
+```
+
+Artifactory requires PostgreSQL (the embedded database is refused) and the Pro
+image rather than OSS:
+
+```bash
+docker network create petclinic-ci
+
+docker run -d --name artifactory-db --network petclinic-ci \
+  -e POSTGRES_DB=artifactory -e POSTGRES_USER=artifactory -e POSTGRES_PASSWORD=artifactory \
+  postgres:16
+
+docker run -d --name artifactory --network petclinic-ci -p 8081:8081 -p 8082:8082 \
+  -e JF_SHARED_DATABASE_TYPE=postgresql \
+  -e JF_SHARED_DATABASE_DRIVER=org.postgresql.Driver \
+  -e JF_SHARED_DATABASE_URL=jdbc:postgresql://artifactory-db:5432/artifactory \
+  -e JF_SHARED_DATABASE_USERNAME=artifactory -e JF_SHARED_DATABASE_PASSWORD=artifactory \
+  releases-docker.jfrog.io/jfrog/artifactory-pro:latest
+```
+
+Activate a self-hosted trial license, then create three Maven repositories:
+`cloud-maven-remote` (remote, pointing at the JFrog Cloud virtual repo, with your
+identity token), `central-remote` (remote, Maven Central), and `petclinic-virtual`
+(virtual, including both, Cloud first). Jenkins needs an `artifactory-selfhosted`
+username/password credential.
+
 ## License
 
 The Spring PetClinic sample application is released under version 2.0 of the [Apache License](https://www.apache.org/licenses/LICENSE-2.0).

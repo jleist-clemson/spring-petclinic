@@ -1,10 +1,17 @@
 pipeline {
     agent any
 
+    parameters {
+        choice(name: 'ARTIFACTORY', choices: ['cloud', 'selfhosted'],
+               description: 'Which Artifactory to resolve dependencies through')
+    }
+
     environment {
-        // non-secret jfrog credentials. needs to be updated if you use a different JFrog instance or repository.
-        JFROG_URL  = 'https://trialp0kvcv.jfrog.io'
-        JFROG_REPO = 'petclinic-libs-snapshot'
+        // non-secret jfrog coordinates. needs to be updated if you use a different JFrog instance or repository.
+        JFROG_URL   = "${params.ARTIFACTORY == 'selfhosted' ? 'http://localhost:8082' : 'https://trialp0kvcv.jfrog.io'}"
+        JFROG_REPO  = "${params.ARTIFACTORY == 'selfhosted' ? 'petclinic-virtual' : 'petclinic-libs-snapshot'}"
+        JFROG_CREDS = "${params.ARTIFACTORY == 'selfhosted' ? 'artifactory-selfhosted' : 'jfrog-cloud'}"
+        DOCKER_NET  = "${params.ARTIFACTORY == 'selfhosted' ? '--network host' : ''}"
     }
 
     stages {
@@ -13,7 +20,7 @@ pipeline {
                 echo 'Building from source..'
                 // only build here; tests come later
                 // use -B for batch mode to avoid interactive prompts
-                withCredentials([usernamePassword(credentialsId: 'jfrog-cloud',
+                withCredentials([usernamePassword(credentialsId: env.JFROG_CREDS,
                                                   usernameVariable: 'JFROG_USER',
                                                   passwordVariable: 'JFROG_PASSWORD')]) {
                     sh './mvnw -B clean package -DskipTests'
@@ -24,7 +31,7 @@ pipeline {
         stage('Test') {
             steps {
                 echo 'Running tests..'
-                withCredentials([usernamePassword(credentialsId: 'jfrog-cloud',
+                withCredentials([usernamePassword(credentialsId: env.JFROG_CREDS,
                                                   usernameVariable: 'JFROG_USER',
                                                   passwordVariable: 'JFROG_PASSWORD')]) {
                     sh './mvnw -B test'
@@ -36,11 +43,11 @@ pipeline {
             steps {
                 echo 'Packaging as a Docker image..'
                 // pin the build platform to linux/amd64 so that the resulting image is portable
-                withCredentials([usernamePassword(credentialsId: 'jfrog-cloud',
+                withCredentials([usernamePassword(credentialsId: env.JFROG_CREDS,
                                                   usernameVariable: 'JFROG_USER',
                                                   passwordVariable: 'JFROG_PASSWORD')]) {
                     sh '''
-                        DOCKER_BUILDKIT=1 docker build --platform linux/amd64 --provenance=false --sbom=false --build-arg JFROG_URL=${JFROG_URL} --build-arg JFROG_REPO=${JFROG_REPO} --secret id=jfrog_user,env=JFROG_USER --secret id=jfrog_password,env=JFROG_PASSWORD -t spring-petclinic:${BUILD_NUMBER} -t spring-petclinic:latest .
+                        DOCKER_BUILDKIT=1 docker build ${DOCKER_NET} --platform linux/amd64 --provenance=false --sbom=false --build-arg JFROG_URL=${JFROG_URL} --build-arg JFROG_REPO=${JFROG_REPO} --secret id=jfrog_user,env=JFROG_USER --secret id=jfrog_password,env=JFROG_PASSWORD -t spring-petclinic:${BUILD_NUMBER} -t spring-petclinic:latest .
                     '''
                 }
 
